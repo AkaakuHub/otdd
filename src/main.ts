@@ -407,7 +407,9 @@ class OTDDApp {
   }
 
   private async loadExtensions(): Promise<void> {
-    const extensionsPath = path.join(__dirname, '../extensions');
+    const extensionsPath = path.join(__dirname, '../../extensions');
+    
+    console.log(`📁 Checking extensions path: ${extensionsPath}`);
     
     if (!fs.existsSync(extensionsPath)) {
       console.log('Extensions directory not found, creating...');
@@ -423,9 +425,20 @@ class OTDDApp {
         .filter(dirent => dirent.isDirectory())
         .map(dirent => dirent.name);
 
+      console.log(`📦 Found ${extensionDirs.length} extension directories:`, extensionDirs);
+
+      if (extensionDirs.length === 0) {
+        console.log('⚠️ No extension directories found');
+        return;
+      }
+
       for (const extensionDir of extensionDirs) {
         const extensionPath = path.join(extensionsPath, extensionDir);
         const manifestPath = path.join(extensionPath, 'manifest.json');
+
+        console.log(`🔍 Checking extension: ${extensionDir}`);
+        console.log(`📄 Manifest path: ${manifestPath}`);
+        console.log(`📄 Manifest exists: ${fs.existsSync(manifestPath)}`);
 
         if (fs.existsSync(manifestPath)) {
           try {
@@ -433,6 +446,15 @@ class OTDDApp {
             
             const manifestContent = fs.readFileSync(manifestPath, 'utf8');
             let manifest = JSON.parse(manifestContent);
+            
+            console.log(`📋 Extension manifest for ${extensionDir}:`, {
+              name: manifest.name,
+              version: manifest.version,
+              manifest_version: manifest.manifest_version,
+              background: manifest.background ? 'present' : 'none',
+              content_scripts: manifest.content_scripts ? manifest.content_scripts.length : 0,
+              permissions: manifest.permissions || []
+            });
             
             // 🛠️ RADICAL FIX: Convert ALL extensions to content-script only mode
             await this.convertToContentScriptMode(extensionPath, manifest);
@@ -443,18 +465,35 @@ class OTDDApp {
               allowServiceWorkers: false // DISABLE for ALL extensions
             };
             
+            console.log(`🚀 Loading extension ${extensionDir} with options:`, loadOptions);
             await session.defaultSession.loadExtension(extensionPath, loadOptions);
             console.log(`✅ Successfully loaded ${extensionDir} in CONTENT-SCRIPT MODE`);
             
           } catch (error) {
             console.error(`❌ Failed to load extension ${extensionDir}:`, error);
+            console.error(`📍 Error details:`, {
+              message: error instanceof Error ? error.message : String(error),
+              stack: error instanceof Error ? error.stack : undefined
+            });
           }
         } else {
           console.warn(`⚠️ Extension ${extensionDir} missing manifest.json`);
         }
       }
+      
+      // Load後に読み込まれた拡張機能を確認
+      const loadedExtensions = session.defaultSession.getAllExtensions();
+      console.log(`🎯 Total loaded extensions: ${loadedExtensions.length}`);
+      loadedExtensions.forEach(ext => {
+        console.log(`📎 Loaded: ${ext.name} (${ext.id})`);
+      });
+      
     } catch (error) {
       console.error('💥 Critical error loading extensions:', error);
+      console.error('📍 Critical error details:', {
+        message: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined
+      });
     }
   }
 
