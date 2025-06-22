@@ -1,0 +1,52 @@
+{
+  "name": "otdd",
+  "version": "1.0.0",
+  "description": "Old TweetDeck Desktop - Twitter desktop app with custom extensions",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc && electron dist/main.js",
+    "start": "electron dist/main.js",
+    "pack": "electron-builder",
+    "dist": "electron-builder --publish=never",
+    "install-electron": "node node_modules/electron/install.js"
+  },
+  "keywords": [
+    "electron",
+    "twitter",
+    "tweetdeck",
+    "desktop"
+  ],
+  "author": "akaaku",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/chrome": "^0.0.326",
+    "@types/node": "^20.0.0",
+    "electron": "^28.0.0",
+    "electron-builder": "^24.0.0",
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "electron-chrome-extensions": "^3.10.0"
+  },
+  "build": {
+    "appId": "com.akaaku.otdd",
+    "productName": "Old TweetDeck Desktop",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "extensions/**/*"
+    ],
+    "mac": {
+      "category": "public.app-category.social-networking"
+    },
+    "win": {
+      "target": "nsis"
+    },
+    "linux": {
+      "target": "AppImage"
+    }
+  }
+}

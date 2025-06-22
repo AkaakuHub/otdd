@@ -1,0 +1,10 @@
+extensions/
+dist/
+
+node_modules/
+*.log
+*.tsbuildinfo
+
+.DS_Store
+
+todo.md
