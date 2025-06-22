@@ -57,6 +57,87 @@ if (!chrome.action) {
 }
 
 // Additional Chrome API polyfills for better extension compatibility
+if (!chrome.storage) {
+  // preloadスクリプトではlocalStorageに直接アクセスできないため、
+  // 簡単なメモリベースのストレージを実装
+  const memoryStorage: { [key: string]: any } = {};
+  
+  const storageProxy = {
+    get: function(keys: any, callback: (result: any) => void) {
+      console.log('✅ chrome.storage.local.get called');
+      const result: any = {};
+      if (typeof keys === 'string') {
+        result[keys] = memoryStorage[keys];
+      } else if (Array.isArray(keys)) {
+        keys.forEach(key => {
+          result[key] = memoryStorage[key];
+        });
+      } else if (typeof keys === 'object') {
+        Object.keys(keys).forEach(key => {
+          result[key] = memoryStorage[key] !== undefined ? memoryStorage[key] : keys[key];
+        });
+      }
+      callback(result);
+    },
+    set: function(items: any, callback?: () => void) {
+      console.log('✅ chrome.storage.local.set called');
+      Object.keys(items).forEach(key => {
+        memoryStorage[key] = items[key];
+      });
+      if (callback) callback();
+    },
+    remove: function(keys: string | string[], callback?: () => void) {
+      console.log('✅ chrome.storage.local.remove called');
+      if (typeof keys === 'string') {
+        delete memoryStorage[keys];
+      } else {
+        keys.forEach(key => delete memoryStorage[key]);
+      }
+      if (callback) callback();
+    }
+  };
+
+  chrome.storage = {
+    local: storageProxy,
+    sync: storageProxy, // syncもメモリストレージで代用
+    onChanged: {
+      addListener: function(callback: (changes: any) => void) {
+        console.log('✅ chrome.storage.onChanged.addListener called');
+      },
+      removeListener: function(callback: (changes: any) => void) {
+        console.log('✅ chrome.storage.onChanged.removeListener called');
+      }
+    }
+  };
+}
+
+if (!chrome.runtime) {
+  chrome.runtime = {
+    sendMessage: function(message: any, responseCallback?: (response: any) => void) {
+      console.log('✅ chrome.runtime.sendMessage called');
+      if (responseCallback) {
+        setTimeout(() => responseCallback({}), 10);
+      }
+    },
+    onMessage: {
+      addListener: function(callback: (message: any, sender: any, sendResponse: any) => void) {
+        console.log('✅ chrome.runtime.onMessage.addListener called');
+      },
+      removeListener: function(callback: (message: any, sender: any, sendResponse: any) => void) {
+        console.log('✅ chrome.runtime.onMessage.removeListener called');
+      }
+    },
+    getManifest: function() {
+      return {
+        name: 'Extension',
+        version: '1.0.0',
+        manifest_version: 3
+      };
+    },
+    id: 'otdd-extension-' + Math.random().toString(36).substr(2, 9)
+  };
+}
+
 if (!chrome.contextMenus) {
   chrome.contextMenus = {
     create: function(properties: any, callback?: () => void) { 

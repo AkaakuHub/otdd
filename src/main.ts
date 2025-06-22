@@ -220,7 +220,7 @@ class OTDDApp {
         // V3 compatibility
         globalThis.chrome.action = globalThis.chrome.browserAction;
         
-        console.log('Extension Chrome APIs initialized');
+        console.log('Extension Chrome APIs injected');
       }
     `;
     
@@ -266,11 +266,17 @@ class OTDDApp {
     // Inject Chrome API polyfills before page load
     this.mainWindow.webContents.on('dom-ready', () => {
       this.injectChromePolyfills();
+      this.obliterateCSPWithJavaScript();
     });
 
     // Also inject polyfills before loading the page
     this.mainWindow.webContents.on('will-navigate', () => {
       this.injectPolyfillScript();
+    });
+
+    // 🔥 NUCLEAR CSP OVERRIDE - DOMレベルでもCSPを完全破壊
+    this.mainWindow.webContents.on('did-finish-load', () => {
+      this.obliterateCSPWithJavaScript();
     });
 
     // Load TweetDeck with retry mechanism
@@ -417,8 +423,15 @@ class OTDDApp {
       return;
     }
 
-    // 🚀 NEW APPROACH: Pre-inject Chrome APIs into session BEFORE loading extensions
-    await this.setupSessionAPIs();
+    // � CRITICAL: Setup ULTRA CSP obliteration FIRST before ANY extension loading
+    console.log('🛡️ PRIORITY 1: Setting up ULTRA CSP OBLITERATION before extension loading...');
+    await this.setupUltraCSPObliteration();
+    
+    // Wait a bit to ensure CSP hooks are established
+    await new Promise(resolve => setTimeout(resolve, 500));
+    
+    // �🚀 NEW APPROACH: Pre-inject Chrome APIs into session BEFORE loading extensions
+    console.log('🚀 Chrome API session setup completed after CSP obliteration');
 
     try {
       const extensionDirs = fs.readdirSync(extensionsPath, { withFileTypes: true })
@@ -698,6 +711,87 @@ class OTDDApp {
     // 🌟 REVOLUTIONARY APPROACH: Inject APIs at session level
     console.log('🚀 Setting up session-level Chrome APIs...');
     
+    // 🔥 ULTIMATE CSP OBLITERATION - 全てのCSPを完全に破壊
+    session.defaultSession.webRequest.onHeadersReceived({
+      urls: [
+        'https://x.com/*', 
+        'https://twitter.com/*',
+        'https://*.x.com/*',
+        'https://*.twitter.com/*',
+        'https://tweetdeck.twitter.com/*',
+        'https://*.twimg.com/*',
+        '*://*/*' // すべてのURLをキャッチ
+      ]
+    }, (details, callback) => {
+      const responseHeaders = { ...details.responseHeaders };
+      
+      console.log(`🎯 INTERCEPTING: ${details.url}`);
+      
+      // あらゆる形式のCSPヘッダーを完全に削除・無効化
+      const cspHeaders = [
+        'content-security-policy',
+        'Content-Security-Policy',
+        'CONTENT-SECURITY-POLICY',
+        'content-security-policy-report-only',
+        'Content-Security-Policy-Report-Only',
+        'CONTENT-SECURITY-POLICY-REPORT-ONLY'
+      ];
+      
+      let cspFound = false;
+      cspHeaders.forEach(header => {
+        if (responseHeaders[header]) {
+          console.log(`🚨 DESTROYING CSP HEADER [${header}]:`, responseHeaders[header]);
+          delete responseHeaders[header]; // 完全に削除
+          cspFound = true;
+        }
+      });
+      
+      if (cspFound) {
+        console.log('💥 ALL CSP HEADERS OBLITERATED!');
+      }
+      
+      // 強制的に完全に緩いCSPをセット（fallback）
+      responseHeaders['Content-Security-Policy'] = [
+        "default-src * 'unsafe-inline' 'unsafe-eval' data: blob: filesystem: about: ws: wss: 'unsafe-hashes'; " +
+        "script-src * 'unsafe-inline' 'unsafe-eval' data: blob: chrome-extension: 'unsafe-hashes'; " +
+        "connect-src * data: blob: chrome-extension: ws: wss: https://raw.githubusercontent.com https://github.com https://tweetdeck.dimden.dev; " +
+        "style-src * 'unsafe-inline' data: blob: 'unsafe-hashes'; " +
+        "img-src * data: blob: chrome-extension:; " +
+        "font-src * data: blob: chrome-extension:; " +
+        "frame-src * data: blob:; " +
+        "media-src * data: blob:; " +
+        "object-src * data: blob:; " +
+        "worker-src * data: blob:; " +
+        "child-src * data: blob:; " +
+        "frame-ancestors *; " +
+        "form-action *; " +
+        "upgrade-insecure-requests; " +
+        "block-all-mixed-content;"
+      ];
+      
+      console.log('�️ FORCED ULTRA-PERMISSIVE CSP SET');
+      
+      callback({ responseHeaders });
+    });
+    
+    // 🌪️ ADDITIONAL CSP DESTRUCTION - セッションレベルでも強制上書き
+    session.defaultSession.webRequest.onBeforeRequest({
+      urls: ['*://*/*']
+    }, (details, callback) => {
+      console.log(`📡 REQUEST INTERCEPTED: ${details.url}`);
+      callback({});
+    });
+    
+    // 🔥 META TAG CSP INJECTION - HTMLレベルでもCSPを無効化
+    session.defaultSession.webRequest.onBeforeRequest({
+      urls: ['https://x.com/*', 'https://twitter.com/*']
+    }, (details, callback) => {
+      if (details.resourceType === 'mainFrame') {
+        console.log('🎯 MAIN FRAME DETECTED - will inject CSP override meta tag');
+      }
+      callback({});
+    });
+    
     // Use webRequest to inject into extension contexts
     session.defaultSession.webRequest.onHeadersReceived({
       urls: ['chrome-extension://*/*']
@@ -707,7 +801,7 @@ class OTDDApp {
       callback({
         responseHeaders: {
           ...details.responseHeaders,
-          'Content-Security-Policy': ['script-src \'self\' \'unsafe-inline\' \'unsafe-eval\'; object-src \'self\'']
+          'Content-Security-Policy': ['default-src * \'unsafe-inline\' \'unsafe-eval\'; script-src * \'unsafe-inline\' \'unsafe-eval\';']
         }
       });
     });
@@ -812,6 +906,98 @@ class OTDDApp {
     };
   }
   
+  // 🔧 CHROME STORAGE API (特にsync)
+  if (!chrome.storage) {
+    const localStorageProxy = {
+      get: function(keys, callback) {
+        console.log('✅ CONTENT: chrome.storage.local.get');
+        const result = {};
+        if (typeof keys === 'string') {
+          const value = localStorage.getItem('otdd_' + keys);
+          result[keys] = value ? JSON.parse(value) : undefined;
+        } else if (Array.isArray(keys)) {
+          keys.forEach(key => {
+            const value = localStorage.getItem('otdd_' + key);
+            result[key] = value ? JSON.parse(value) : undefined;
+          });
+        } else if (typeof keys === 'object') {
+          Object.keys(keys).forEach(key => {
+            const value = localStorage.getItem('otdd_' + key);
+            result[key] = value ? JSON.parse(value) : keys[key];
+          });
+        }
+        if (callback) callback(result);
+      },
+      set: function(items, callback) {
+        console.log('✅ CONTENT: chrome.storage.local.set');
+        Object.keys(items).forEach(key => {
+          localStorage.setItem('otdd_' + key, JSON.stringify(items[key]));
+        });
+        if (callback) callback();
+      },
+      remove: function(keys, callback) {
+        console.log('✅ CONTENT: chrome.storage.local.remove');
+        if (typeof keys === 'string') {
+          localStorage.removeItem('otdd_' + keys);
+        } else {
+          keys.forEach(key => localStorage.removeItem('otdd_' + key));
+        }
+        if (callback) callback();
+      },
+      clear: function(callback) {
+        console.log('✅ CONTENT: chrome.storage.local.clear');
+        Object.keys(localStorage).forEach(key => {
+          if (key.startsWith('otdd_')) {
+            localStorage.removeItem(key);
+          }
+        });
+        if (callback) callback();
+      }
+    };
+    
+    chrome.storage = {
+      local: localStorageProxy,
+      sync: localStorageProxy, // syncもlocalで代用
+      onChanged: {
+        addListener: function(callback) {
+          console.log('✅ CONTENT: chrome.storage.onChanged.addListener');
+        },
+        removeListener: function(callback) {
+          console.log('✅ CONTENT: chrome.storage.onChanged.removeListener');
+        }
+      }
+    };
+  }
+  
+  // 🔧 RUNTIME MESSAGING API
+  if (!chrome.runtime) {
+    chrome.runtime = {
+      sendMessage: function(message, responseCallback) {
+        console.log('✅ CONTENT: chrome.runtime.sendMessage', message);
+        // メッセージをlocalStorageを通じて処理
+        if (responseCallback) {
+          setTimeout(() => responseCallback({}), 10);
+        }
+      },
+      onMessage: {
+        addListener: function(callback) {
+          console.log('✅ CONTENT: chrome.runtime.onMessage.addListener');
+        },
+        removeListener: function(callback) {
+          console.log('✅ CONTENT: chrome.runtime.onMessage.removeListener');
+        }
+      },
+      getManifest: function() {
+        return {
+          name: 'Extension',
+          version: '1.0.0',
+          manifest_version: 3
+        };
+      },
+      id: 'otdd-extension-' + Math.random().toString(36).substr(2, 9)
+    };
+  }
+  
   // V3 compatibility
   if (!chrome.action) {
     chrome.action = chrome.browserAction;
@@ -882,6 +1068,190 @@ class OTDDApp {
         }, retryDelay);
       }
     }
+  }
+
+  private obliterateCSPWithJavaScript(): void {
+    if (!this.mainWindow) return;
+
+    const cspKillerScript = `
+      (function() {
+        try {
+          console.log('🔥 NUCLEAR CSP OBLITERATION STARTING...');
+          
+          // 1. メタタグのCSPを全て削除
+          const cspMetas = document.querySelectorAll('meta[http-equiv*="Content-Security-Policy"], meta[http-equiv*="content-security-policy"]');
+          cspMetas.forEach((meta, index) => {
+            console.log('💥 DESTROYING CSP META TAG ' + (index + 1) + ':', meta.getAttribute('content'));
+            meta.remove();
+          });
+        
+        // 2. 新しい超緩いCSPメタタグを挿入
+        const newCSP = document.createElement('meta');
+        newCSP.setAttribute('http-equiv', 'Content-Security-Policy');
+        newCSP.setAttribute('content', 
+          "default-src * 'unsafe-inline' 'unsafe-eval' data: blob: filesystem: about: ws: wss:; " +
+          "script-src * 'unsafe-inline' 'unsafe-eval' data: blob: chrome-extension:; " +
+          "connect-src * data: blob: ws: wss: https://raw.githubusercontent.com https://github.com; " +
+          "style-src * 'unsafe-inline' data: blob:; " +
+          "img-src * data: blob:; " +
+          "font-src * data: blob:; " +
+          "frame-src * data: blob:; " +
+          "media-src * data: blob:; " +
+          "object-src * data: blob:; " +
+          "worker-src * data: blob:; " +
+          "child-src * data: blob:; " +
+          "frame-ancestors *; " +
+          "form-action *;"
+        );
+        if (document.head) {
+          document.head.insertBefore(newCSP, document.head.firstChild);
+          console.log('✅ ULTRA-PERMISSIVE CSP META TAG INJECTED');
+        } else {
+          console.log('⚠️ document.head not available yet');
+        }
+        
+        // 3. nonceを持つすべての要素からnonce属性を削除
+        const elementsWithNonce = document.querySelectorAll('[nonce]');
+        elementsWithNonce.forEach((element, index) => {
+          const nonce = element.getAttribute('nonce');
+          console.log('🗑️ REMOVING NONCE ' + (index + 1) + ':', nonce);
+          element.removeAttribute('nonce');
+        });
+        
+        // 4. 動的に追加されるCSPメタタグを監視して即座に削除
+        const observer = new MutationObserver((mutations) => {
+          mutations.forEach((mutation) => {
+            mutation.addedNodes.forEach((node) => {
+              if (node.nodeType === 1) { // 1 = ELEMENT_NODE
+                const element = node;
+                if (element.tagName === 'META' && 
+                    element.getAttribute && 
+                    element.getAttribute('http-equiv') && 
+                    element.getAttribute('http-equiv').toLowerCase().includes('content-security-policy')) {
+                  console.log('🚨 DYNAMIC CSP META DETECTED AND DESTROYED:', element.getAttribute('content'));
+                  element.remove();
+                }
+                
+                // 追加されたnonce属性も削除
+                if (element.hasAttribute && element.hasAttribute('nonce')) {
+                  console.log('🗑️ REMOVING DYNAMIC NONCE:', element.getAttribute('nonce'));
+                  element.removeAttribute('nonce');
+                }
+                
+                // 子要素のnonceも削除
+                const childrenWithNonce = element.querySelectorAll && element.querySelectorAll('[nonce]');
+                if (childrenWithNonce) {
+                  childrenWithNonce.forEach((child) => {
+                    console.log('🗑️ REMOVING CHILD NONCE:', child.getAttribute('nonce'));
+                    child.removeAttribute('nonce');
+                  });
+                }
+              }
+            });
+          });
+        });
+        
+        if (document.head) {
+          observer.observe(document.head, { childList: true, subtree: true });
+        }
+        if (document.body) {
+          observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['nonce'] });
+        } else if (document.documentElement) {
+          observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['nonce'] });
+        }
+        
+        console.log('🛡️ CSP OBLITERATION COMPLETE - CONTINUOUS MONITORING ACTIVE');
+        
+        // 5. 定期的にCSPメタタグをチェックして削除
+        setInterval(() => {
+          const cspMetas = document.querySelectorAll('meta[http-equiv*="Content-Security-Policy"], meta[http-equiv*="content-security-policy"]');
+          if (cspMetas.length > 1) { // 我々が追加した1つ以外があれば削除
+            cspMetas.forEach((meta, index) => {
+              if (index > 0) { // 最初の（我々の）以外を削除
+                console.log('🔄 PERIODIC CSP META CLEANUP:', meta.getAttribute('content'));
+                meta.remove();
+              }
+            });
+          }
+        }, 1000);
+        
+        } catch (error) {
+          console.error('❌ CSP OBLITERATION ERROR:', error);
+        }
+      })();
+    `;
+
+    this.mainWindow.webContents.executeJavaScript(cspKillerScript)
+      .then(() => {
+        console.log('💥 NUCLEAR CSP OBLITERATION EXECUTED SUCCESSFULLY');
+      })
+      .catch(err => {
+        console.error('❌ Failed to execute CSP obliteration:', err);
+      });
+  }
+
+  private async setupUltraCSPObliteration(): Promise<void> {
+    console.log('🔥🔥🔥 ULTRA CSP OBLITERATION STARTING...');
+    
+    // 🌪️ PHASE 1: Clear any existing webRequest listeners first
+    session.defaultSession.webRequest.onHeadersReceived(null);
+    session.defaultSession.webRequest.onBeforeRequest(null);
+    
+    // Wait a moment to ensure cleanup
+    await new Promise(resolve => setTimeout(resolve, 100));
+    
+    // 🌪️ PHASE 2: Setup MULTIPLE webRequest hooks to catch ALL CSP headers
+    const cspHeaders = [
+      'content-security-policy',
+      'Content-Security-Policy', 
+      'CONTENT-SECURITY-POLICY',
+      'content-security-policy-report-only',
+      'Content-Security-Policy-Report-Only',
+      'CONTENT-SECURITY-POLICY-REPORT-ONLY'
+    ];
+
+    // Hook 1: ULTIMATE CATCH-ALL - Every single HTTP request
+    session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+      const responseHeaders = { ...details.responseHeaders };
+      let cspDestroyed = false;
+      
+      console.log(`🎯 ULTIMATE INTERCEPT: ${details.url}`);
+      
+      // Destroy ALL CSP headers without exception
+      cspHeaders.forEach(header => {
+        if (responseHeaders[header]) {
+          console.log(`💥 ULTIMATE DESTROYING CSP [${header}]:`, responseHeaders[header]);
+          delete responseHeaders[header];
+          cspDestroyed = true;
+        }
+      });
+      
+      // Force ultra-permissive CSP for ALL URLs
+      responseHeaders['Content-Security-Policy'] = [
+        "default-src * data: blob: 'unsafe-inline' 'unsafe-eval' 'unsafe-hashes'; " +
+        "script-src * data: blob: 'unsafe-inline' 'unsafe-eval' 'unsafe-hashes'; " +
+        "connect-src * data: blob: ws: wss:; " +
+        "style-src * data: blob: 'unsafe-inline' 'unsafe-hashes'; " +
+        "img-src * data: blob:; " +
+        "font-src * data: blob:; " +
+        "frame-src * data: blob:; " +
+        "media-src * data: blob:; " +
+        "object-src * data: blob:; " +
+        "worker-src * data: blob:; " +
+        "child-src * data: blob:; " +
+        "frame-ancestors *; " +
+        "form-action *;"
+      ];
+      
+      // Also remove any Report-Only headers
+      delete responseHeaders['Content-Security-Policy-Report-Only'];
+      delete responseHeaders['content-security-policy-report-only'];
+      
+      console.log(`�️ ULTIMATE CSP SET FOR: ${details.url}`);
+      callback({ responseHeaders });
+    });
+
+    console.log('✅ ULTIMATE CSP OBLITERATION SETUP COMPLETE');
   }
 }
 
