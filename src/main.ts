@@ -835,22 +835,28 @@ class OTDDApp {
         delete manifest.service_worker;
         modified = true;
       }
-      
-      // Force all extensions to content-script mode by injecting our API
+       // Force all extensions to content-script mode by injecting our API
       if (!manifest.content_scripts) {
         manifest.content_scripts = [];
       }
-      
-      // Add our Chrome API injection as the FIRST content script
-      const apiInjectionScript = {
-        matches: ["<all_urls>"],
-        js: ["otdd-chrome-api-injection.js"],
-        run_at: "document_start",
-        all_frames: true
-      };
-      
-      manifest.content_scripts.unshift(apiInjectionScript);
-      modified = true;
+
+      // Check if our API injection script already exists
+      const hasApiInjection = manifest.content_scripts.some((script: any) => 
+        script.js && script.js.includes('otdd-chrome-api-injection.js')
+      );
+
+      if (!hasApiInjection) {
+        // Add our Chrome API injection as the FIRST content script
+        const apiInjectionScript = {
+          matches: ["<all_urls>"],
+          js: ["otdd-chrome-api-injection.js"],
+          run_at: "document_start",
+          all_frames: true
+        };
+
+        manifest.content_scripts.unshift(apiInjectionScript);
+        modified = true;
+      }
       
       // Create the API injection file
       await this.createAPIInjectionFile(extensionPath);
