@@ -56,85 +56,227 @@ if (!chrome.action) {
   chrome.action = chrome.browserAction;
 }
 
-// Additional Chrome API polyfills for better extension compatibility
+// Enhanced Chrome API polyfills for better extension compatibility
 if (!chrome.storage) {
-  // preloadスクリプトではlocalStorageに直接アクセスできないため、
-  // 簡単なメモリベースのストレージを実装
-  const memoryStorage: { [key: string]: any } = {};
+  // Enhanced memory-based storage with proper sync support
+  const memoryStorage = new Map<string, any>();
+  const syncStorage = new Map<string, any>();
   
-  const storageProxy = {
-    get: function(keys: any, callback: (result: any) => void) {
-      console.log('✅ chrome.storage.local.get called');
-      const result: any = {};
-      if (typeof keys === 'string') {
-        result[keys] = memoryStorage[keys];
-      } else if (Array.isArray(keys)) {
-        keys.forEach(key => {
-          result[key] = memoryStorage[key];
-        });
-      } else if (typeof keys === 'object') {
-        Object.keys(keys).forEach(key => {
-          result[key] = memoryStorage[key] !== undefined ? memoryStorage[key] : keys[key];
-        });
+  const createStorageArea = (storageMap: Map<string, any>, storageType: string) => ({
+    get: function(keys: string | string[] | object | null, callback?: (result: any) => void) {
+      console.log(`✅ chrome.storage.${storageType}.get called`);
+      
+      try {
+        const result: any = {};
+        
+        if (keys === null || keys === undefined) {
+          // Get all values
+          storageMap.forEach((value, key) => {
+            result[key] = value;
+          });
+        } else if (typeof keys === 'string') {
+          result[keys] = storageMap.get(keys);
+        } else if (Array.isArray(keys)) {
+          keys.forEach(key => {
+            result[key] = storageMap.get(key);
+          });
+        } else if (typeof keys === 'object') {
+          Object.keys(keys).forEach(key => {
+            const value = storageMap.get(key);
+            result[key] = value !== undefined ? value : (keys as any)[key];
+          });
+        }
+        
+        if (callback) {
+          setTimeout(() => callback(result), 1);
+        }
+      } catch (error) {
+        console.error(`❌ Storage get error (${storageType}):`, error);
+        if (callback) callback({});
       }
-      callback(result);
     },
-    set: function(items: any, callback?: () => void) {
-      console.log('✅ chrome.storage.local.set called');
-      Object.keys(items).forEach(key => {
-        memoryStorage[key] = items[key];
-      });
-      if (callback) callback();
+    
+    set: function(items: {[key: string]: any}, callback?: () => void) {
+      console.log(`✅ chrome.storage.${storageType}.set called`);
+      
+      try {
+        Object.keys(items).forEach(key => {
+          storageMap.set(key, items[key]);
+        });
+        
+        if (callback) {
+          setTimeout(() => callback(), 1);
+        }
+      } catch (error) {
+        console.error(`❌ Storage set error (${storageType}):`, error);
+        if (callback) callback();
+      }
     },
+    
     remove: function(keys: string | string[], callback?: () => void) {
-      console.log('✅ chrome.storage.local.remove called');
-      if (typeof keys === 'string') {
-        delete memoryStorage[keys];
-      } else {
-        keys.forEach(key => delete memoryStorage[key]);
+      console.log(`✅ chrome.storage.${storageType}.remove called`);
+      
+      try {
+        const keysArray = typeof keys === 'string' ? [keys] : keys;
+        keysArray.forEach(key => storageMap.delete(key));
+        
+        if (callback) {
+          setTimeout(() => callback(), 1);
+        }
+      } catch (error) {
+        console.error(`❌ Storage remove error (${storageType}):`, error);
+        if (callback) callback();
       }
-      if (callback) callback();
+    },
+    
+    clear: function(callback?: () => void) {
+      console.log(`✅ chrome.storage.${storageType}.clear called`);
+      
+      try {
+        storageMap.clear();
+        
+        if (callback) {
+          setTimeout(() => callback(), 1);
+        }
+      } catch (error) {
+        console.error(`❌ Storage clear error (${storageType}):`, error);
+        if (callback) callback();
+      }
+    },
+    
+    getBytesInUse: function(keys?: string | string[], callback?: (bytesInUse: number) => void) {
+      console.log(`✅ chrome.storage.${storageType}.getBytesInUse called`);
+      if (callback) callback(0);
     }
-  };
+  });
 
   chrome.storage = {
-    local: storageProxy,
-    sync: storageProxy, // syncもメモリストレージで代用
+    local: createStorageArea(memoryStorage, 'local'),
+    sync: createStorageArea(syncStorage, 'sync'),
     onChanged: {
-      addListener: function(callback: (changes: any) => void) {
+      _listeners: [] as any[],
+      addListener: function(callback: (changes: any, areaName: string) => void) {
         console.log('✅ chrome.storage.onChanged.addListener called');
+        this._listeners.push(callback);
       },
-      removeListener: function(callback: (changes: any) => void) {
+      removeListener: function(callback: (changes: any, areaName: string) => void) {
         console.log('✅ chrome.storage.onChanged.removeListener called');
+        const index = this._listeners.indexOf(callback);
+        if (index > -1) {
+          this._listeners.splice(index, 1);
+        }
+      },
+      hasListener: function(callback: (changes: any, areaName: string) => void) {
+        return this._listeners.includes(callback);
+      },
+      hasListeners: function() {
+        return this._listeners.length > 0;
       }
     }
   };
 }
 
 if (!chrome.runtime) {
+  // Enhanced messaging system for preload context
+  const messageListeners: Array<(message: any, sender: any, sendResponse: any) => void> = [];
+  
   chrome.runtime = {
-    sendMessage: function(message: any, responseCallback?: (response: any) => void) {
-      console.log('✅ chrome.runtime.sendMessage called');
-      if (responseCallback) {
-        setTimeout(() => responseCallback({}), 10);
+    sendMessage: function(extensionId: string | any, message?: any, options?: any, responseCallback?: (response: any) => void) {
+      // Handle both 3-param and 4-param versions
+      if (typeof extensionId !== 'string') {
+        responseCallback = options;
+        options = message;
+        message = extensionId;
+        extensionId = chrome.runtime.id;
+      }
+      if (typeof options === 'function') {
+        responseCallback = options;
+        options = {};
+      }
+      
+      console.log('✅ chrome.runtime.sendMessage called', { extensionId, message, options });
+      
+      try {
+        // Simulate successful message sending
+        if (responseCallback) {
+          setTimeout(() => {
+            try {
+              responseCallback({ success: true, extensionId, message });
+            } catch (e) {
+              console.log('Response callback error:', e);
+            }
+          }, 10);
+        }
+      } catch (error) {
+        console.error('❌ sendMessage error:', error);
+        if (responseCallback) {
+          setTimeout(() => responseCallback({ error: String(error) }), 10);
+        }
       }
     },
+    
     onMessage: {
       addListener: function(callback: (message: any, sender: any, sendResponse: any) => void) {
         console.log('✅ chrome.runtime.onMessage.addListener called');
+        messageListeners.push(callback);
       },
       removeListener: function(callback: (message: any, sender: any, sendResponse: any) => void) {
         console.log('✅ chrome.runtime.onMessage.removeListener called');
+        const index = messageListeners.indexOf(callback);
+        if (index > -1) {
+          messageListeners.splice(index, 1);
+        }
+      },
+      hasListener: function(callback: (message: any, sender: any, sendResponse: any) => void) {
+        return messageListeners.includes(callback);
+      },
+      hasListeners: function() {
+        return messageListeners.length > 0;
       }
     },
+    
+    connect: function(extensionId?: string, connectInfo?: any) {
+      console.log('✅ chrome.runtime.connect called');
+      return {
+        postMessage: function(message: any) {
+          console.log('✅ Port postMessage:', message);
+        },
+        disconnect: function() {
+          console.log('✅ Port disconnect');
+        },
+        onMessage: {
+          addListener: function(callback: any) {
+            console.log('✅ Port onMessage.addListener');
+          },
+          removeListener: function(callback: any) {
+            console.log('✅ Port onMessage.removeListener');
+          }
+        },
+        onDisconnect: {
+          addListener: function(callback: any) {
+            console.log('✅ Port onDisconnect.addListener');
+          },
+          removeListener: function(callback: any) {
+            console.log('✅ Port onDisconnect.removeListener');
+          }
+        }
+      };
+    },
+    
     getManifest: function() {
       return {
-        name: 'Extension',
+        name: 'OTDD Extension',
         version: '1.0.0',
         manifest_version: 3
       };
     },
-    id: 'otdd-extension-' + Math.random().toString(36).substr(2, 9)
+    
+    getURL: function(path: string) {
+      return 'chrome-extension://otdd-extension/' + path;
+    },
+    
+    id: 'otdd-extension-' + Math.random().toString(36).substr(2, 9),
+    lastError: null
   };
 }
 

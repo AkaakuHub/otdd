@@ -23,12 +23,14 @@
   "devDependencies": {
     "@types/chrome": "^0.0.326",
     "@types/node": "^24.0.3",
+    "@types/webextension-polyfill": "^0.12.3",
     "electron": "^36.5.0",
     "electron-builder": "^26.0.12",
     "typescript": "^5.8.3"
   },
   "dependencies": {
-    "electron-chrome-extensions": "^4.8.0"
+    "electron-chrome-extensions": "^4.8.0",
+    "webextension-polyfill": "^0.12.0"
   },
   "build": {
     "appId": "com.akaaku.otdd",
