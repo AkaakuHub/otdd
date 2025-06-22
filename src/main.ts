@@ -1,4 +1,4 @@
-import { app, BrowserWindow, session } from 'electron';
+import { app, BrowserWindow, session, Menu } from 'electron';
 import { ElectronChromeExtensions } from 'electron-chrome-extensions';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -47,6 +47,7 @@ class OTDDApp {
     
     this.extensions = new ElectronChromeExtensions({
       session: session.defaultSession,
+      license: 'GPL-3.0',
       createTab: async (details) => {
         // For now, we'll open new tabs in the same window
         if (this.mainWindow && details.url) {
@@ -252,7 +253,7 @@ class OTDDApp {
       webPreferences: {
         nodeIntegration: false,
         contextIsolation: true,
-        preload: path.join(__dirname, 'preload/preload.js'),
+        preload: path.join(__dirname, '../preload/preload.js'),
         session: session.defaultSession
       }
     });
@@ -288,10 +289,121 @@ class OTDDApp {
     // Performance optimizations
     this.setupPerformanceOptimizations();
 
-    // Development tools
-    if (process.env.NODE_ENV === 'development') {
-      this.mainWindow.webContents.openDevTools();
-    }
+    // Development tools - always open
+    this.mainWindow.webContents.openDevTools();
+    
+    // Add keyboard shortcut for dev tools
+    this.mainWindow.webContents.on('before-input-event', (event, input) => {
+      if (input.control && input.shift && input.key === 'I') {
+        this.mainWindow?.webContents.toggleDevTools();
+      }
+      if (input.meta && input.alt && input.key === 'I') {
+        this.mainWindow?.webContents.toggleDevTools();
+      }
+    });
+
+    // Create application menu
+    this.createApplicationMenu();
+  }
+
+  private createApplicationMenu(): void {
+    const template = [
+      {
+        label: 'アプリケーション',
+        submenu: [
+          {
+            label: 'OTDD について',
+            role: 'about'
+          },
+          { type: 'separator' },
+          {
+            label: 'OTDD を終了',
+            accelerator: 'CmdOrCtrl+Q',
+            click: () => {
+              app.quit();
+            }
+          }
+        ]
+      },
+      {
+        label: '表示',
+        submenu: [
+          {
+            label: '再読み込み',
+            accelerator: 'CmdOrCtrl+R',
+            click: () => {
+              this.mainWindow?.webContents.reload();
+            }
+          },
+          {
+            label: '強制再読み込み',
+            accelerator: 'CmdOrCtrl+Shift+R',
+            click: () => {
+              this.mainWindow?.webContents.reloadIgnoringCache();
+            }
+          },
+          { type: 'separator' },
+          {
+            label: '開発者ツール',
+            accelerator: process.platform === 'darwin' ? 'Cmd+Option+I' : 'Ctrl+Shift+I',
+            click: () => {
+              this.mainWindow?.webContents.toggleDevTools();
+            }
+          },
+          { type: 'separator' },
+          {
+            label: '実際のサイズ',
+            accelerator: 'CmdOrCtrl+0',
+            click: () => {
+              this.mainWindow?.webContents.setZoomLevel(0);
+            }
+          },
+          {
+            label: '拡大',
+            accelerator: 'CmdOrCtrl+Plus',
+            click: () => {
+              const currentZoom = this.mainWindow?.webContents.getZoomLevel() || 0;
+              this.mainWindow?.webContents.setZoomLevel(currentZoom + 0.5);
+            }
+          },
+          {
+            label: '縮小',
+            accelerator: 'CmdOrCtrl+-',
+            click: () => {
+              const currentZoom = this.mainWindow?.webContents.getZoomLevel() || 0;
+              this.mainWindow?.webContents.setZoomLevel(currentZoom - 0.5);
+            }
+          },
+          { type: 'separator' },
+          {
+            label: '全画面表示',
+            accelerator: process.platform === 'darwin' ? 'Ctrl+Cmd+F' : 'F11',
+            click: () => {
+              const isFullScreen = this.mainWindow?.isFullScreen() || false;
+              this.mainWindow?.setFullScreen(!isFullScreen);
+            }
+          }
+        ]
+      },
+      {
+        label: 'ウィンドウ',
+        submenu: [
+          {
+            label: '最小化',
+            accelerator: 'CmdOrCtrl+M',
+            role: 'minimize'
+          },
+          {
+            label: '閉じる',
+            accelerator: 'CmdOrCtrl+W',
+            role: 'close'
+          }
+        ]
+      }
+    ];
+
+    const menu = Menu.buildFromTemplate(template as any);
+    Menu.setApplicationMenu(menu);
   }
 
   private async loadExtensions(): Promise<void> {
