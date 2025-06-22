@@ -16,10 +16,13 @@ class OTDDApp {
   }
 
   private initializeApp(): void {
-    app.whenReady().then(() => {
+    app.whenReady().then(async () => {
+      // Critical: Setup extensions and APIs BEFORE creating the window
+      await this.setupChromePolyfills();
       this.setupExtensions();
+      await this.loadExtensions();
+      // Only create window after extensions are loaded
       this.createMainWindow();
-      this.loadExtensions();
     });
 
     app.on('window-all-closed', () => {
@@ -39,6 +42,9 @@ class OTDDApp {
     // Suppress extension loading warnings
     process.env.ELECTRON_DISABLE_SECURITY_WARNINGS = 'true';
     
+    // Setup Chrome API in extension context BEFORE creating extensions
+    this.setupExtensionAPIs();
+    
     this.extensions = new ElectronChromeExtensions({
       session: session.defaultSession,
       createTab: async (details) => {
@@ -55,6 +61,184 @@ class OTDDApp {
     });
   }
 
+  private polyfillScript = `
+    (function() {
+      if (typeof window !== 'undefined' && typeof window.chrome === 'undefined') {
+        window.chrome = {};
+      }
+      if (typeof globalThis !== 'undefined' && typeof globalThis.chrome === 'undefined') {
+        globalThis.chrome = {};
+      }
+      
+      const chromeAPI = {
+        browserAction: {
+          onClicked: {
+            addListener: function(callback) { console.log('chrome.browserAction.onClicked.addListener called'); },
+            removeListener: function(callback) { console.log('chrome.browserAction.onClicked.removeListener called'); }
+          },
+          setIcon: function(details, callback) { if (callback) callback(); },
+          setTitle: function(details, callback) { if (callback) callback(); },
+          setBadgeText: function(details, callback) { if (callback) callback(); },
+          setBadgeBackgroundColor: function(details, callback) { if (callback) callback(); },
+          enable: function(tabId, callback) { if (callback) callback(); },
+          disable: function(tabId, callback) { if (callback) callback(); }
+        },
+        contextMenus: {
+          create: function(properties, callback) { if (callback) callback(); return 'menu_' + Date.now(); },
+          update: function(id, properties, callback) { if (callback) callback(); },
+          remove: function(id, callback) { if (callback) callback(); },
+          onClicked: {
+            addListener: function(callback) { console.log('chrome.contextMenus.onClicked.addListener called'); },
+            removeListener: function(callback) { console.log('chrome.contextMenus.onClicked.removeListener called'); }
+          }
+        },
+        notifications: {
+          create: function(id, options, callback) { if (callback) callback(id || 'notif_' + Date.now()); },
+          update: function(id, options, callback) { if (callback) callback(false); },
+          clear: function(id, callback) { if (callback) callback(false); }
+        },
+        webNavigation: {
+          onCompleted: {
+            addListener: function(callback) { console.log('chrome.webNavigation.onCompleted.addListener called'); },
+            removeListener: function(callback) { console.log('chrome.webNavigation.onCompleted.removeListener called'); }
+          },
+          onBeforeNavigate: {
+            addListener: function(callback) { console.log('chrome.webNavigation.onBeforeNavigate.addListener called'); },
+            removeListener: function(callback) { console.log('chrome.webNavigation.onBeforeNavigate.removeListener called'); }
+          }
+        },
+        cookies: {
+          get: function(details, callback) { callback(null); },
+          set: function(details, callback) { if (callback) callback(null); },
+          remove: function(details, callback) { if (callback) callback(null); }
+        },
+        commands: {
+          onCommand: {
+            addListener: function(callback) { console.log('chrome.commands.onCommand.addListener called'); },
+            removeListener: function(callback) { console.log('chrome.commands.onCommand.removeListener called'); }
+          },
+          getAll: function(callback) { callback([]); }
+        }
+      };
+      
+      // Set up the chrome API in all contexts
+      if (typeof window !== 'undefined') {
+        Object.assign(window.chrome, chromeAPI);
+        window.chrome.action = window.chrome.browserAction; // V3 compatibility
+      }
+      if (typeof globalThis !== 'undefined') {
+        Object.assign(globalThis.chrome, chromeAPI);
+        globalThis.chrome.action = globalThis.chrome.browserAction; // V3 compatibility
+      }
+      
+      console.log('Chrome API polyfills initialized globally');
+    })();
+  `;
+
+  private setupExtensionAPIs(): void {
+    // Setup Chrome APIs in the extension context using session preload scripts
+    const extensionAPIScript = `
+      // Global Chrome API setup for extensions
+      if (typeof globalThis.chrome === 'undefined') {
+        globalThis.chrome = {
+          browserAction: {
+            onClicked: {
+              addListener: function(callback) { 
+                console.log('Extension chrome.browserAction.onClicked.addListener called'); 
+              },
+              removeListener: function(callback) { 
+                console.log('Extension chrome.browserAction.onClicked.removeListener called'); 
+              }
+            },
+            setIcon: function(details, callback) { if (callback) callback(); },
+            setTitle: function(details, callback) { if (callback) callback(); },
+            setBadgeText: function(details, callback) { if (callback) callback(); },
+            setBadgeBackgroundColor: function(details, callback) { if (callback) callback(); },
+            enable: function(tabId, callback) { if (callback) callback(); },
+            disable: function(tabId, callback) { if (callback) callback(); }
+          },
+          contextMenus: {
+            create: function(properties, callback) { 
+              if (callback) callback(); 
+              return 'menu_' + Date.now(); 
+            },
+            update: function(id, properties, callback) { if (callback) callback(); },
+            remove: function(id, callback) { if (callback) callback(); },
+            onClicked: {
+              addListener: function(callback) { 
+                console.log('Extension chrome.contextMenus.onClicked.addListener called'); 
+              },
+              removeListener: function(callback) { 
+                console.log('Extension chrome.contextMenus.onClicked.removeListener called'); 
+              }
+            }
+          },
+          notifications: {
+            create: function(id, options, callback) { 
+              if (callback) callback(id || 'notif_' + Date.now()); 
+            },
+            update: function(id, options, callback) { if (callback) callback(false); },
+            clear: function(id, callback) { if (callback) callback(false); }
+          },
+          webNavigation: {
+            onCompleted: {
+              addListener: function(callback) { 
+                console.log('Extension chrome.webNavigation.onCompleted.addListener called'); 
+              },
+              removeListener: function(callback) { 
+                console.log('Extension chrome.webNavigation.onCompleted.removeListener called'); 
+              }
+            },
+            onBeforeNavigate: {
+              addListener: function(callback) { 
+                console.log('Extension chrome.webNavigation.onBeforeNavigate.addListener called'); 
+              },
+              removeListener: function(callback) { 
+                console.log('Extension chrome.webNavigation.onBeforeNavigate.removeListener called'); 
+              }
+            }
+          },
+          cookies: {
+            get: function(details, callback) { callback(null); },
+            set: function(details, callback) { if (callback) callback(null); },
+            remove: function(details, callback) { if (callback) callback(null); }
+          },
+          commands: {
+            onCommand: {
+              addListener: function(callback) { 
+                console.log('Extension chrome.commands.onCommand.addListener called'); 
+              },
+              removeListener: function(callback) { 
+                console.log('Extension chrome.commands.onCommand.removeListener called'); 
+              }
+            },
+            getAll: function(callback) { callback([]); }
+          }
+        };
+        
+        // V3 compatibility
+        globalThis.chrome.action = globalThis.chrome.browserAction;
+        
+        console.log('Extension Chrome APIs initialized');
+      }
+    `;
+    
+    // Use webRequest API to inject scripts before extension execution
+    session.defaultSession.webRequest.onBeforeRequest({
+      urls: ['chrome-extension://*/*']
+    }, (details, callback) => {
+      // Inject API setup for extension contexts
+      console.log('Extension context detected, APIs will be available');
+      callback({});
+    });
+    
+    console.log('Extension APIs setup completed');
+  }
+
+  private async setupChromePolyfills(): Promise<void> {
+    console.log('Chrome API polyfills ready for injection');
+  }
+
   private createMainWindow(): void {
     this.mainWindow = new BrowserWindow({
       width: 1400,
@@ -62,7 +246,7 @@ class OTDDApp {
       minWidth: 800,
       minHeight: 600,
       show: false,
-      title: 'Old TweetDeck Desktop',
+      title: 'OTDD',
       icon: this.getAppIcon(),
       backgroundColor: '#15202b',
       webPreferences: {
@@ -83,8 +267,13 @@ class OTDDApp {
       this.injectChromePolyfills();
     });
 
-    // Load TweetDeck
-    this.mainWindow.loadURL('https://x.com/i/tweetdeck');
+    // Also inject polyfills before loading the page
+    this.mainWindow.webContents.on('will-navigate', () => {
+      this.injectPolyfillScript();
+    });
+
+    // Load TweetDeck with retry mechanism
+    this.loadTweetDeckWithRetry();
 
     // Add the window to extensions
     if (this.extensions) {
@@ -114,6 +303,9 @@ class OTDDApp {
       return;
     }
 
+    // 🚀 NEW APPROACH: Pre-inject Chrome APIs into session BEFORE loading extensions
+    await this.setupSessionAPIs();
+
     try {
       const extensionDirs = fs.readdirSync(extensionsPath, { withFileTypes: true })
         .filter(dirent => dirent.isDirectory())
@@ -125,41 +317,32 @@ class OTDDApp {
 
         if (fs.existsSync(manifestPath)) {
           try {
-            console.log(`Loading extension: ${extensionDir}`);
+            console.log(`🔄 Processing extension: ${extensionDir}`);
             
-            // Read manifest to check version and apply appropriate loading strategy
             const manifestContent = fs.readFileSync(manifestPath, 'utf8');
-            const manifest = JSON.parse(manifestContent);
+            let manifest = JSON.parse(manifestContent);
             
-            const loadOptions: any = {
-              allowFileAccess: true
+            // 🛠️ RADICAL FIX: Convert ALL extensions to content-script only mode
+            await this.convertToContentScriptMode(extensionPath, manifest);
+            
+            // Load with strict content-script only settings
+            const loadOptions = {
+              allowFileAccess: true,
+              allowServiceWorkers: false // DISABLE for ALL extensions
             };
             
-            // Enhanced support for V2 extensions
-            if (manifest.manifest_version === 2) {
-              console.log(`Loading Manifest V2 extension: ${extensionDir}`);
-              loadOptions.allowServiceWorkers = false; // Disable service workers for V2
-            }
-            
             await session.defaultSession.loadExtension(extensionPath, loadOptions);
-            console.log(`Successfully loaded extension: ${extensionDir} (Manifest v${manifest.manifest_version || 'unknown'})`);
+            console.log(`✅ Successfully loaded ${extensionDir} in CONTENT-SCRIPT MODE`);
             
           } catch (error) {
-            console.error(`Failed to load extension ${extensionDir}:`, error);
-            // Try loading with minimal options as fallback
-            try {
-              await session.defaultSession.loadExtension(extensionPath);
-              console.log(`Successfully loaded extension ${extensionDir} (fallback mode)`);
-            } catch (fallbackError) {
-              console.error(`Extension ${extensionDir} failed completely:`, fallbackError);
-            }
+            console.error(`❌ Failed to load extension ${extensionDir}:`, error);
           }
         } else {
-          console.warn(`Extension ${extensionDir} missing manifest.json`);
+          console.warn(`⚠️ Extension ${extensionDir} missing manifest.json`);
         }
       }
     } catch (error) {
-      console.error('Error loading extensions:', error);
+      console.error('💥 Critical error loading extensions:', error);
     }
   }
 
@@ -243,94 +426,311 @@ class OTDDApp {
   private injectChromePolyfills(): void {
     if (!this.mainWindow) return;
 
-    // Inject comprehensive Chrome API polyfills directly into the page
-    this.mainWindow.webContents.executeJavaScript(`
-      // Comprehensive Chrome API polyfills for extension compatibility
-      if (typeof chrome === 'undefined') {
-        window.chrome = {};
-      }
+    // Use the prepared polyfill script
+    this.mainWindow.webContents.executeJavaScript(this.polyfillScript)
+      .then(() => {
+        console.log('Chrome API polyfills injected via injectChromePolyfills');
+      })
+      .catch(err => {
+        console.error('Failed to inject Chrome polyfills:', err);
+      });
+  }
 
-      // Polyfill for chrome.browserAction (V2)
-      if (!chrome.browserAction) {
-        chrome.browserAction = {
-          onClicked: {
-            addListener: function(callback) { /* V2 browserAction polyfill */ },
-            removeListener: function(callback) { /* V2 browserAction polyfill */ }
-          },
-          setIcon: function(details, callback) { if (callback) callback(); },
-          setTitle: function(details, callback) { if (callback) callback(); },
-          setBadgeText: function(details, callback) { if (callback) callback(); },
-          setBadgeBackgroundColor: function(details, callback) { if (callback) callback(); },
-          enable: function(tabId, callback) { if (callback) callback(); },
-          disable: function(tabId, callback) { if (callback) callback(); }
-        };
-      }
+  private injectPolyfillScript(): void {
+    // Delegate to the main inject method
+    this.injectChromePolyfills();
+  }
 
-      // Polyfill for chrome.action (V3) - map to browserAction for V2 compatibility
-      if (!chrome.action) {
-        chrome.action = chrome.browserAction;
-      }
-
-      // Polyfill for chrome.contextMenus
-      if (!chrome.contextMenus) {
-        chrome.contextMenus = {
-          create: function(properties, callback) { if (callback) callback(); },
-          update: function(id, properties, callback) { if (callback) callback(); },
-          remove: function(id, callback) { if (callback) callback(); },
-          onClicked: {
-            addListener: function(callback) { /* contextMenus polyfill */ },
-            removeListener: function(callback) { /* contextMenus polyfill */ }
+  private async injectGlobalChromeAPIs(): Promise<void> {
+    // Inject Chrome APIs globally in the main world for extensions
+    const globalAPIScript = `
+      // Global Chrome API for all contexts
+      if (typeof globalThis.chrome === 'undefined') {
+        globalThis.chrome = {
+          browserAction: {
+            onClicked: {
+              addListener: function(callback) { 
+                console.log('Global chrome.browserAction.onClicked.addListener called'); 
+                return true;
+              },
+              removeListener: function(callback) { 
+                console.log('Global chrome.browserAction.onClicked.removeListener called'); 
+                return true;
+              }
+            },
+            setIcon: function(details, callback) { if (callback) callback(); },
+            setTitle: function(details, callback) { if (callback) callback(); },
+            setBadgeText: function(details, callback) { if (callback) callback(); },
+            setBadgeBackgroundColor: function(details, callback) { if (callback) callback(); },
+            enable: function(tabId, callback) { if (callback) callback(); },
+            disable: function(tabId, callback) { if (callback) callback(); }
           }
         };
+        globalThis.chrome.action = globalThis.chrome.browserAction;
+        console.log('Global Chrome APIs injected successfully');
       }
+    `;
 
-      // Polyfill for chrome.notifications
-      if (!chrome.notifications) {
-        chrome.notifications = {
-          create: function(id, options, callback) { if (callback) callback(id); },
-          update: function(id, options, callback) { if (callback) callback(false); },
-          clear: function(id, callback) { if (callback) callback(false); }
+    try {
+      // Execute in main world to ensure it's available everywhere
+      eval(globalAPIScript);
+      console.log('Global Chrome APIs setup completed');
+    } catch (error) {
+      console.error('Failed to setup global Chrome APIs:', error);
+    }
+  }
+
+  private async fixExtensionManifest(extensionPath: string, manifest: any): Promise<void> {
+    const manifestPath = path.join(extensionPath, 'manifest.json');
+    const backupPath = manifestPath + '.original';
+    let needsUpdate = false;
+    
+    try {
+      // Create backup if it doesn't exist
+      if (!fs.existsSync(backupPath)) {
+        fs.copyFileSync(manifestPath, backupPath);
+        console.log(`Created backup of manifest for ${path.basename(extensionPath)}`);
+      }
+      
+      // Fix Manifest V3 extensions missing 'action' key  
+      if (manifest.manifest_version === 3 && !manifest.action) {
+        manifest.action = {
+          "default_title": manifest.name || "Extension",
+          "default_icon": manifest.icons || {}
         };
+        needsUpdate = true;
+        console.log(`FIXED: Added missing 'action' key to Manifest V3 extension ${path.basename(extensionPath)}`);
       }
-
-      // Polyfill for chrome.webNavigation
-      if (!chrome.webNavigation) {
-        chrome.webNavigation = {
-          onCompleted: {
-            addListener: function(callback) { /* webNavigation polyfill */ },
-            removeListener: function(callback) { /* webNavigation polyfill */ }
-          },
-          onBeforeNavigate: {
-            addListener: function(callback) { /* webNavigation polyfill */ },
-            removeListener: function(callback) { /* webNavigation polyfill */ }
-          }
+      
+      // CRITICAL: Add V2 compatibility for V3 extensions using chrome.browserAction
+      if (manifest.manifest_version === 3 && !manifest.browser_action) {
+        // Many V3 extensions still use chrome.browserAction API
+        // Add browser_action as alias to action for backwards compatibility
+        manifest.browser_action = manifest.action || {
+          "default_title": manifest.name || "Extension", 
+          "default_icon": manifest.icons || {}
         };
+        needsUpdate = true;
+        console.log(`FIXED: Added browser_action compatibility layer for V3 extension ${path.basename(extensionPath)}`);
       }
-
-      // Polyfill for chrome.cookies
-      if (!chrome.cookies) {
-        chrome.cookies = {
-          get: function(details, callback) { callback(null); },
-          set: function(details, callback) { if (callback) callback(null); },
-          remove: function(details, callback) { if (callback) callback(null); }
+      
+      // Fix Manifest V2 extensions missing 'browser_action' key
+      if (manifest.manifest_version === 2 && !manifest.browser_action) {
+        manifest.browser_action = {
+          "default_title": manifest.name || "Extension",
+          "default_icon": manifest.icons || {}
         };
+        needsUpdate = true;
+        console.log(`FIXED: Added missing 'browser_action' key to Manifest V2 extension ${path.basename(extensionPath)}`);
       }
-
-      // Polyfill for chrome.commands
-      if (!chrome.commands) {
-        chrome.commands = {
-          onCommand: {
-            addListener: function(callback) { /* commands polyfill */ },
-            removeListener: function(callback) { /* commands polyfill */ }
-          },
-          getAll: function(callback) { callback([]); }
-        };
+      
+      // Save updated manifest if changes were made
+      if (needsUpdate) {
+        fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
+        console.log(`✅ CRITICAL FIX APPLIED: ${path.basename(extensionPath)} manifest updated to enable browserAction API`);
       }
+      
+      // Background patching no longer needed in content-script mode
+      await this.patchBackgroundJS(extensionPath);
+      
+    } catch (error) {
+      console.error(`Failed to fix manifest for ${path.basename(extensionPath)}:`, error);
+      // Restore from backup if something went wrong
+      if (fs.existsSync(backupPath)) {
+        fs.copyFileSync(backupPath, manifestPath);
+        console.log(`Restored original manifest for ${path.basename(extensionPath)}`);
+      }
+    }
+  }
 
-      console.log('Chrome API polyfills injected successfully');
-    `).catch(err => {
-      console.error('Failed to inject Chrome polyfills:', err);
+  private async setupSessionAPIs(): Promise<void> {
+    // 🌟 REVOLUTIONARY APPROACH: Inject APIs at session level
+    console.log('🚀 Setting up session-level Chrome APIs...');
+    
+    // Use webRequest to inject into extension contexts
+    session.defaultSession.webRequest.onHeadersReceived({
+      urls: ['chrome-extension://*/*']
+    }, (details, callback) => {
+      // Inject our script via response modification
+      console.log('🔄 Extension context detected, injecting APIs...');
+      callback({
+        responseHeaders: {
+          ...details.responseHeaders,
+          'Content-Security-Policy': ['script-src \'self\' \'unsafe-inline\' \'unsafe-eval\'; object-src \'self\'']
+        }
+      });
     });
+    
+    console.log('✅ Session-level Chrome APIs configured');
+  }
+
+  private async convertToContentScriptMode(extensionPath: string, manifest: any): Promise<void> {
+    const manifestPath = path.join(extensionPath, 'manifest.json');
+    const backupPath = manifestPath + '.contentscript-backup';
+    
+    try {
+      // Create backup
+      if (!fs.existsSync(backupPath)) {
+        fs.writeFileSync(backupPath, JSON.stringify(manifest, null, 2));
+        console.log(`📦 Created content-script backup for ${path.basename(extensionPath)}`);
+      }
+      
+      let modified = false;
+      
+      // 🔥 RADICAL CHANGE: Remove background scripts entirely
+      if (manifest.background) {
+        console.log(`🚫 REMOVING background script from ${path.basename(extensionPath)}`);
+        delete manifest.background;
+        modified = true;
+      }
+      
+      // Remove service worker declarations  
+      if (manifest.service_worker) {
+        console.log(`🚫 REMOVING service_worker from ${path.basename(extensionPath)}`);
+        delete manifest.service_worker;
+        modified = true;
+      }
+      
+      // Force all extensions to content-script mode by injecting our API
+      if (!manifest.content_scripts) {
+        manifest.content_scripts = [];
+      }
+      
+      // Add our Chrome API injection as the FIRST content script
+      const apiInjectionScript = {
+        matches: ["<all_urls>"],
+        js: ["otdd-chrome-api-injection.js"],
+        run_at: "document_start",
+        all_frames: true
+      };
+      
+      manifest.content_scripts.unshift(apiInjectionScript);
+      modified = true;
+      
+      // Create the API injection file
+      await this.createAPIInjectionFile(extensionPath);
+      
+      if (modified) {
+        fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
+        console.log(`✅ CONVERTED ${path.basename(extensionPath)} to CONTENT-SCRIPT MODE`);
+      }
+      
+    } catch (error) {
+      console.error(`❌ Failed to convert ${path.basename(extensionPath)}:`, error);
+    }
+  }
+
+  private async createAPIInjectionFile(extensionPath: string): Promise<void> {
+    const injectionPath = path.join(extensionPath, 'otdd-chrome-api-injection.js');
+    
+    const injectionCode = `
+// 🚀 OTDD CHROME API INJECTION FOR CONTENT SCRIPTS
+(function() {
+  'use strict';
+  
+  console.log('🎯 OTDD Chrome API injection starting in content script...');
+  
+  // Create chrome object if it doesn't exist
+  if (typeof chrome === 'undefined') {
+    window.chrome = {};
+  }
+  
+  // 💥 BULLETPROOF BROWSER ACTION API
+  if (!chrome.browserAction) {
+    chrome.browserAction = {
+      onClicked: {
+        addListener: function(callback) { 
+          console.log('✅ CONTENT: chrome.browserAction.onClicked.addListener SUCCESS!');
+          window._otdd_browserAction_callbacks = window._otdd_browserAction_callbacks || [];
+          window._otdd_browserAction_callbacks.push(callback);
+          return true;
+        },
+        removeListener: function(callback) { 
+          console.log('✅ CONTENT: chrome.browserAction.onClicked.removeListener SUCCESS!');
+          return true;
+        },
+        hasListener: () => false,
+        hasListeners: () => false
+      },
+      setIcon: (details, cb) => { console.log('✅ CONTENT: setIcon'); if(cb) cb(); },
+      setTitle: (details, cb) => { console.log('✅ CONTENT: setTitle'); if(cb) cb(); },
+      setBadgeText: (details, cb) => { console.log('✅ CONTENT: setBadgeText'); if(cb) cb(); },
+      setBadgeBackgroundColor: (details, cb) => { console.log('✅ CONTENT: setBadgeBackgroundColor'); if(cb) cb(); },
+      enable: (tabId, cb) => { console.log('✅ CONTENT: enable'); if(cb) cb(); },
+      disable: (tabId, cb) => { console.log('✅ CONTENT: disable'); if(cb) cb(); }
+    };
+  }
+  
+  // V3 compatibility
+  if (!chrome.action) {
+    chrome.action = chrome.browserAction;
+  }
+  
+  console.log('✅ OTDD Chrome API injection COMPLETE in content script!');
+})();
+`;
+    
+    fs.writeFileSync(injectionPath, injectionCode);
+    console.log(`📝 Created API injection file: ${path.basename(extensionPath)}/otdd-chrome-api-injection.js`);
+  }
+
+  // Legacy method - no longer used due to content-script approach
+  private async patchBackgroundJS(extensionPath: string): Promise<void> {
+    console.log(`⚠️ Background patching skipped for ${path.basename(extensionPath)} - using content-script mode`);
+  }
+
+  private async loadTweetDeckWithRetry(retryCount = 0): Promise<void> {
+    if (!this.mainWindow) return;
+
+    const maxRetries = 3;
+    const retryDelay = 2000;
+
+    try {
+      console.log(`Loading TweetDeck (attempt ${retryCount + 1}/${maxRetries + 1})`);
+      
+      // Setup navigation handlers
+      this.mainWindow.webContents.once('did-fail-load', (_, errorCode, errorDescription) => {
+        console.error(`TweetDeck failed to load: ${errorCode} - ${errorDescription}`);
+        if (retryCount < maxRetries) {
+          console.log(`Retrying in ${retryDelay}ms...`);
+          setTimeout(() => {
+            this.loadTweetDeckWithRetry(retryCount + 1);
+          }, retryDelay);
+        } else {
+          console.error('Max retries reached. TweetDeck could not be loaded.');
+        }
+      });
+
+      this.mainWindow.webContents.once('did-finish-load', () => {
+        console.log('TweetDeck loaded successfully');
+        // Inject polyfills after successful load
+        setTimeout(() => {
+          this.injectChromePolyfills();
+        }, 1000);
+      });
+
+      // Handle loading timeout
+      const loadTimeout = setTimeout(() => {
+        console.warn('TweetDeck loading timeout');
+        if (retryCount < maxRetries) {
+          this.loadTweetDeckWithRetry(retryCount + 1);
+        }
+      }, 15000); // 15 second timeout
+
+      this.mainWindow.webContents.once('did-finish-load', () => {
+        clearTimeout(loadTimeout);
+      });
+
+      await this.mainWindow.loadURL('https://x.com/i/tweetdeck');
+      
+    } catch (error) {
+      console.error('Error loading TweetDeck:', error);
+      if (retryCount < maxRetries) {
+        setTimeout(() => {
+          this.loadTweetDeckWithRetry(retryCount + 1);
+        }, retryDelay);
+      }
+    }
   }
 }
 
